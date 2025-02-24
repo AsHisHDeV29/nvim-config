@@ -1,115 +1,115 @@
 return {
-	{
-		"williamboman/mason.nvim",
-		lazy = false,
-		config = function()
-			require("mason").setup()
-		end,
-	},
-	{
-		"williamboman/mason-lspconfig.nvim",
-		lazy = false,
-		config = function()
-			require("mason-lspconfig").setup({
-				ensure_installed = { "rust_analyzer", "lua_ls", "gopls", "clangd" },
-			})
-		end,
-	},
-	{
-		"neovim/nvim-lspconfig",
-		dependencies = { "hrsh7th/nvim-cmp" },
-		config = function()
-			local capabilities = require("cmp_nvim_lsp").default_capabilities()
-			local lspconfig = require("lspconfig")
+    {
+        "williamboman/mason.nvim",
+        lazy = false,
+        config = function()
+            require("mason").setup()
+        end,
+    },
+    {
+        "williamboman/mason-lspconfig.nvim",
+        lazy = false,
+        config = function()
+            require("mason-lspconfig").setup({
+                ensure_installed = { "rust_analyzer", "lua_ls", "gopls", "clangd", "ts_ls", "pyright" },
+            })
+        end,
+    },
+    {
+        "neovim/nvim-lspconfig",
+        dependencies = { "hrsh7th/nvim-cmp", "nvim-telescope/telescope.nvim" },
+        config = function()
+            local capabilities = require("cmp_nvim_lsp").default_capabilities()
+            local lspconfig = require("lspconfig")
 
-			-- Rust Analyzer
-			lspconfig.rust_analyzer.setup({
-				capabilities = capabilities,
-				root_dir = lspconfig.util.root_pattern("Cargo.toml"),
-				settings = {
-					["rust-analyzer"] = {
-						diagnostics = { enable = true },
-						cargo = { allFeatures = true },
-						checkOnSave = { command = "clippy" },
-						procMacro = { enable = true },
-						imports = { granularity = { group = "module" }, prefix = "self" },
-						workspace = { symbol = { search = { kind = "all_symbols" } } },
-					},
-				},
-				on_attach = function(client, bufnr)
-					-- Guard against premature execution
-					if client.server_capabilities.executeCommandProvider then
-						vim.lsp.buf.execute_command({ command = "rust-analyzer.reloadWorkspace" })
-						vim.notify("Rust-analyzer initialized", vim.log.levels.INFO)
-					else
-						vim.notify("Rust-analyzer not fully attached yet", vim.log.levels.WARN)
-					end
-				end,
-			})
+            local original_notify = vim.notify
+            vim.notify = function(msg, log_level)
+                if msg:match("null-ls") or msg:match("supports") or msg:match("attached to buffer") then
+                    return
+                end
+                original_notify(msg, log_level)
+            end
 
-			-- Lua Language Server
-			lspconfig.lua_ls.setup({
-				capabilities = capabilities,
-				root_dir = lspconfig.util.root_pattern(".git", "*.lua"),
-				settings = { Lua = { diagnostics = { globals = { "vim" } } } },
-			})
+            local on_attach = function(client, bufnr)
+                if not vim.bo[bufnr].modifiable then
+                    return
+                end
+                local opts = { buffer = bufnr, noremap = true, silent = true }
+                vim.keymap.set("n", "<Leader>cd", vim.diagnostic.open_float, opts)
+                vim.keymap.set("n", "<Leader>co", vim.lsp.buf.code_action, opts)
+                vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+                vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
+                vim.keymap.set("n", "<Leader>rn", vim.lsp.buf.rename, opts)
+                vim.keymap.set("n", "<Leader>cf", function()
+                    vim.lsp.buf.format({ async = true })
+                end, opts)
+            end
 
-			-- Go Language Server (gopls)
-			lspconfig.gopls.setup({
-				capabilities = capabilities,
-				root_dir = lspconfig.util.root_pattern("go.mod", ".git"),
-				settings = { gopls = { gofumpt = true } },
-			})
+            lspconfig.rust_analyzer.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern("Cargo.toml"),
+                settings = { ["rust-analyzer"] = { checkOnSave = { command = "clippy" } } },
+                on_attach = on_attach,
+            })
+            lspconfig.lua_ls.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern(".git", "*.lua"),
+                settings = { Lua = { diagnostics = { globals = { "vim" } } } },
+                on_attach = on_attach,
+            })
+            lspconfig.gopls.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern("go.mod", ".git"),
+                settings = { gopls = { gofumpt = true } },
+                on_attach = on_attach,
+            })
+            lspconfig.clangd.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern("compile_commands.json", ".git"),
+                on_attach = on_attach,
+            })
+            lspconfig.ts_ls.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern("package.json", "tsconfig.json", ".git"),
+                on_attach = on_attach,
+            })
+            lspconfig.pyright.setup({
+                capabilities = capabilities,
+                root_dir = lspconfig.util.root_pattern(
+                    "pyproject.toml",
+                    "setup.py",
+                    "requirements.txt",
+                    ".git",
+                    "*.py"
+                ),
+                on_attach = on_attach,
+            })
 
-			-- Clangd (C/C++)
-			lspconfig.clangd.setup({
-				capabilities = capabilities,
-				root_dir = lspconfig.util.root_pattern("compile_commands.json", ".git"),
-				cmd = { "clangd", "--background-index" },
-			})
-
-			-- Autocommands
-			vim.o.autoread = true
-			vim.api.nvim_create_autocmd({ "BufEnter", "CursorHold", "FocusGained" }, {
-				pattern = "*",
-				command = "checktime",
-			})
-			vim.api.nvim_create_autocmd("BufWritePost", {
-				pattern = { "*.rs", "*.lua", "*.go", "*.c", "*.cpp", "*.h", "*.hpp" },
-				callback = function()
-					local bufnr = vim.api.nvim_get_current_buf()
-					vim.notify("Reloading LSP for " .. vim.bo.filetype, vim.log.levels.INFO)
-					vim.schedule(function()
-						for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-							if client.name == "rust_analyzer" then
-								local success, err = pcall(function()
-									vim.lsp.buf.execute_command({ command = "rust-analyzer.reloadWorkspace" })
-									vim.lsp.buf.execute_command({
-										command = "rust-analyzer.runSingle",
-										arguments = { { uri = vim.uri_from_bufnr(bufnr), range = nil } },
-									})
-								end)
-								if success then
-									vim.notify("Rust-analyzer synced", vim.log.levels.INFO)
-								else
-									vim.notify("Rust-analyzer sync failed: " .. tostring(err), vim.log.levels.ERROR)
-								end
-							end
-						end
-					end)
-				end,
-			})
-
-			-- Manual restart command
-			vim.api.nvim_create_user_command("LspRustRestart", function()
-				for _, client in pairs(vim.lsp.get_clients()) do
-					if client.name == "rust_analyzer" then
-						vim.cmd("LspRestart " .. client.id)
-						vim.notify("Restarted rust-analyzer", vim.log.levels.INFO)
-						break
-					end
-				end
-			end, { desc = "Restart rust-analyzer manually" })
-		end,
-	},
+            vim.api.nvim_create_autocmd("BufWritePost", {
+                pattern = {
+                    "*.rs",
+                    "*.lua",
+                    "*.go",
+                    "*.c",
+                    "*.cpp",
+                    "*.h",
+                    "*.hpp",
+                    "*.ts",
+                    "*.tsx",
+                    "*.js",
+                    "*.jsx",
+                    "*.py",
+                },
+                callback = function()
+                    local bufnr = vim.api.nvim_get_current_buf()
+                    if not vim.bo[bufnr].modifiable then
+                        return
+                    end
+                    vim.schedule(function()
+                        vim.lsp.buf.code_action({ apply = true, context = { only = { "quickfix" } } })
+                    end)
+                end,
+            })
+        end,
+    },
 }
